@@ -1,7 +1,7 @@
 package di
 
 import (
-	"depweaver/internal/container"
+	"github.com/binodta/depWeaver/internal/container"
 	"log"
 )
 

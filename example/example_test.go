@@ -1,8 +1,8 @@
 package main
 
 import (
-	"depweaver/pkg/di"
 	"fmt"
+	"github.com/binodta/depWeaver/pkg/di"
 	"testing"
 )
 
