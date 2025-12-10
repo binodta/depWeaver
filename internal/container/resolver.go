@@ -15,18 +15,27 @@ func (dc *DependencyContainer) Resolve(t reflect.Type) (interface{}, error) {
 // @Param t reflect.Type - type of the dependency
 // @Return interface{} - instance of the dependency
 func (dc *DependencyContainer) resolve(t reflect.Type) (interface{}, error) {
+	// Fast path: try read lock to return already-built singletons
+	dc.mu.RLock()
+	if dep, exists := dc.dependencies[t]; exists {
+		dc.mu.RUnlock()
+		return dep, nil
+	}
+	dc.mu.RUnlock()
+
+	// Slow path: acquire write lock to safely check/create
 	dc.mu.Lock()
 
-	// Check for circular dependencies
-	if dc.creating[t] {
-		dc.mu.Unlock()
-		return nil, fmt.Errorf("circular dependency detected for type %v", t)
-	}
-
-	// Check if we already have an instance
+	// Double-check after acquiring the write lock
 	if dep, exists := dc.dependencies[t]; exists {
 		dc.mu.Unlock()
 		return dep, nil
+	}
+
+	// Check for circular dependencies (same semantics as before)
+	if dc.creating[t] {
+		dc.mu.Unlock()
+		return nil, fmt.Errorf("circular dependency detected for type %v", t)
 	}
 
 	// Find the constructor for this type

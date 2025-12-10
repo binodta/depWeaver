@@ -18,7 +18,17 @@ func (dc *DependencyContainer) RegisterConstructor(
 		return fmt.Errorf("constructor must be a function")
 	}
 
-	// Get the return type of the constructor (the type it creates)
+	// Validate constructor signature: must return (T) or (T, error)
+	if constructorType.NumOut() == 0 || constructorType.NumOut() > 2 {
+		return fmt.Errorf("constructor must return either (T) or (T, error)")
+	}
+	if constructorType.NumOut() == 2 {
+		if !constructorType.Out(1).Implements(reflect.TypeOf((*error)(nil)).Elem()) {
+			return fmt.Errorf("second return value must be of type error")
+		}
+	}
+
+	// Get the primary return type of the constructor (the type it creates)
 	returnType := constructorType.Out(0)
 
 	// Wrap the constructor to work with the container
@@ -40,6 +50,14 @@ func (dc *DependencyContainer) RegisterConstructor(
 
 		// Call the constructor
 		results := constructorValue.Call(args)
+		// Handle (T) signature
+		if constructorType.NumOut() == 1 {
+			return results[0].Interface(), nil
+		}
+		// Handle (T, error) signature
+		if errVal := results[1]; !errVal.IsNil() {
+			return nil, errVal.Interface().(error)
+		}
 		return results[0].Interface(), nil
 	}
 
