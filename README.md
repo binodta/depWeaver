@@ -9,7 +9,10 @@ Lightweight, reflection-powered dependency injection for Go with runtime resolut
 - **Flexible return types** - Supports `T` or `(T, error)` signatures
 - **Scope management** - Singleton, Transient, and Scoped lifetimes
 - **Interface-based resolution** - Bind interfaces to concrete implementations
+- **Named dependencies** - Support for multiple implementations and concrete instances
 - **Lazy loading** - Provider pattern for deferred dependency creation
+- **Eager validation** - Graph validation for cycles and missing dependencies
+- **Test Overrides** - Easily swap implementations for mocking in tests
 - **Runtime registration** - Register dependencies dynamically
 - **Circular dependency detection** - Clear error messages with dependency chains
 - **Thread-safe** - Concurrent resolution and registration
@@ -102,10 +105,12 @@ func main() {
 
 ### Basic API (Backward Compatible)
 
-**`di.Init(constructors []interface{})`**
-- Register constructors with Singleton scope (default)
-- Each constructor must be a function returning `T` or `(T, error)`
-- Parameters are automatically resolved from the container
+**`di.Init(constructors []interface{}) error`**
+- Register components with Singleton scope
+- Automatically runs `di.Validate()` and returns error on failure
+
+**`di.MustInit(constructors []interface{})`**
+- Same as `Init` but crashes with `log.Fatalf` on error (ideal for app startup)
 
 **`di.Resolve[T]() (T, error)`**
 - Resolve and return an instance of type `T`
@@ -114,9 +119,12 @@ func main() {
 
 ### Scope Management API
 
-**`di.InitWithScope(registrations []ScopeRegistration)`**
+**`di.InitWithScope(registrations []ScopeRegistration) error`**
 - Register constructors with specific scopes
-- `ScopeRegistration` contains `Constructor` and `Scope`
+- Automatically runs `di.Validate()`
+
+**`di.MustInitWithScope(registrations []ScopeRegistration)`**
+- Same as `InitWithScope` but crashes on error
 - Scopes: `container.Singleton`, `container.Transient`, `container.Scoped`
 
 **`di.ResolveScoped[T](scopeID string) (T, error)`**
@@ -133,6 +141,18 @@ func main() {
 - Clean up scope and its cached instances
 - Should be called when scope is no longer needed
 
+**`di.DestroyAllScopes()`**
+- Force cleanup of ALL active scopes (both unnamed and named)
+- Useful as a contingency for memory leaks or application teardown
+
+**`di.Validate() error`**
+- Eagerly check the entire dependency graph for cycles and missing registrations
+- Recommended to call during application startup
+
+**`di.Override(constructor interface{}, scope container.Scope) error`**
+- Replace an existing registration and clear its cache
+- Ideal for injecting mocks/stubs during testing
+
 ### Interface Binding API
 
 **`di.BindInterface[I any, C any]() error`**
@@ -145,11 +165,15 @@ func main() {
 - Allows multiple implementations of the same interface
 
 **`di.ResolveNamed[T any](name string) (T, error)`**
-- Resolve a named interface binding
-- Used for multiple implementations
+- Resolve a named binding (interface or concrete)
+- Used when multiple implementations of the same type exist
 
 **`di.ResolveNamedScoped[T any](name string, scopeID string) (T, error)`**
-- Resolve a named interface binding within a specific scope
+- Resolve a named binding within a specific scope
+
+**`di.RegisterNamedConstructor(name string, constructor interface{}, scope container.Scope) error`**
+- Register a concrete type with a unique name
+- Allows multiple instances of the same concrete type with independent caching
 
 ### Lazy Loading API
 
@@ -162,20 +186,23 @@ func main() {
 - Resolve the dependency on-demand
 - Subsequent calls return cached instance (for Singleton/Scoped)
 
+**`di.GetProviderNamed[T](name string) container.Provider[T]`**
+- Get a provider for a named dependency
+
 ### Runtime Registration API
 
 **`di.RegisterRuntime(constructor interface{}, scope container.Scope) error`**
-- Register constructor after initialization
-- Useful for plugins or dynamic dependencies
-- Thread-safe
+- Register a constructor after initial setup
+- Automatically runs `di.Validate()`
 
 **`di.RegisterRuntimeBatch(constructors []interface{}, scope container.Scope) error`**
-- Register multiple constructors at runtime with same scope
-- All constructors get the same lifetime scope
-- Returns error if any registration fails
+- Batch runtime registration
+- Runs `di.Validate()` once after all registrations
 
 **`di.RegisterRuntimeWithScopes(registrations []ScopeRegistration) error`**
-- Register multiple constructors with individual scopes
+- Individual scoping for batch runtime registration
+- Runs `di.Validate()` once
+
 - Each constructor can have different lifetime
 - Returns error if any registration fails
 
@@ -303,6 +330,38 @@ di.BindInterfaceNamed[Logger, *FileLogger]("file")
 
 consoleLogger, _ := di.ResolveNamed[Logger]("console")
 fileLogger, _ := di.ResolveNamed[Logger]("file")
+```
+
+### Eager Graph Validation
+
+Verify your wiring at startup:
+
+```go
+func main() {
+    di.Init(constructors)
+    
+    // Catch cycles/missing types before they happen at runtime
+    if err := di.Validate(); err != nil {
+        log.Fatalf("DI Error: %v", err)
+    }
+}
+```
+
+### Test Overrides & Mocking
+
+Swap implementations without resetting the whole container:
+
+```go
+func TestService(t *testing.T) {
+    di.Reset()
+    di.Init([]interface{}{NewRealRepo})
+    
+    // Override with a mock for this test
+    di.Override(NewMockRepo, container.Singleton)
+    
+    svc, _ := di.Resolve[*Service]()
+    // svc now uses MockRepo
+}
 ```
 
 ### HTTP Request Scoping Example

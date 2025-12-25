@@ -16,12 +16,22 @@ func (dc *DependencyContainer) CreateScope() string {
 	return scopeID
 }
 
-// DestroyScope removes a scope and its instances
+// DestroyScope removes a scope and its instances (including named ones)
 func (dc *DependencyContainer) DestroyScope(scopeID string) {
 	dc.mu.Lock()
 	defer dc.mu.Unlock()
 
 	delete(dc.scopedInstances, scopeID)
+	delete(dc.namedScopedInstances, scopeID)
+}
+
+// DestroyAllScopes removes all active scope contexts and their instances
+func (dc *DependencyContainer) DestroyAllScopes() {
+	dc.mu.Lock()
+	defer dc.mu.Unlock()
+
+	dc.scopedInstances = make(map[string]map[reflect.Type]interface{})
+	dc.namedScopedInstances = make(map[string]map[string]map[reflect.Type]interface{})
 }
 
 // generateScopeID generates a unique scope identifier

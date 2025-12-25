@@ -18,6 +18,7 @@ const (
 type Registration struct {
 	constructor func(container *DependencyContainer, scopeID string) (interface{}, error)
 	scope       Scope
+	paramTypes  []reflect.Type // Metadata for validation and analysis
 }
 
 type DependencyContainer struct {
@@ -28,9 +29,12 @@ type DependencyContainer struct {
 	resolutionStack []reflect.Type                          // Track dependency chain for better error reporting
 	scopedInstances map[string]map[reflect.Type]interface{} // Scoped instances by context ID
 
-	// Interface bindings
-	interfaceBindings      map[reflect.Type]reflect.Type            // Unnamed interface -> concrete type bindings
-	namedInterfaceBindings map[string]map[reflect.Type]reflect.Type // Named bindings: name -> (interface -> concrete)
+	// Interface and Named bindings
+	interfaceBindings      map[reflect.Type]reflect.Type                      // Unnamed interface -> concrete type bindings
+	namedInterfaceBindings map[string]map[reflect.Type]reflect.Type           // Named bindings: name -> (interface -> concrete)
+	namedConstructors      map[string]map[reflect.Type]*Registration          // Named concrete type constructors
+	namedDependencies      map[string]map[reflect.Type]interface{}            // Named singleton cache: name -> type -> instance
+	namedScopedInstances   map[string]map[string]map[reflect.Type]interface{} // Named scoped cache: scopeID -> name -> type -> instance
 }
 
 // New creates a new dependency container
@@ -43,5 +47,8 @@ func New() *DependencyContainer {
 		scopedInstances:        make(map[string]map[reflect.Type]interface{}),
 		interfaceBindings:      make(map[reflect.Type]reflect.Type),
 		namedInterfaceBindings: make(map[string]map[reflect.Type]reflect.Type),
+		namedConstructors:      make(map[string]map[reflect.Type]*Registration),
+		namedDependencies:      make(map[string]map[reflect.Type]interface{}),
+		namedScopedInstances:   make(map[string]map[string]map[reflect.Type]interface{}),
 	}
 }

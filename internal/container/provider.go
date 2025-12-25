@@ -10,13 +10,23 @@ type Provider[T any] interface {
 type provider[T any] struct {
 	container *DependencyContainer
 	scopeID   string
+	name      string
 }
 
 // Get resolves and returns the dependency
 func (p *provider[T]) Get() (T, error) {
 	var zero T
-	t := reflect.TypeOf(&zero).Elem()
-	instance, err := p.container.ResolveWithScope(t, p.scopeID)
+	t := reflect.TypeOf((*T)(nil)).Elem()
+
+	var instance interface{}
+	var err error
+
+	if p.name != "" {
+		instance, err = p.container.ResolveNamedWithScope(p.name, t, p.scopeID)
+	} else {
+		instance, err = p.container.ResolveWithScope(t, p.scopeID)
+	}
+
 	if err != nil {
 		return zero, err
 	}
@@ -31,10 +41,10 @@ func (p *provider[T]) Get() (T, error) {
 }
 
 // NewProvider creates a provider for lazy resolution
-// Note: This is a standalone function (not a method) because Go methods cannot have type parameters
-func NewProvider[T any](dc *DependencyContainer, scopeID string) Provider[T] {
+func NewProvider[T any](dc *DependencyContainer, scopeID string, name string) Provider[T] {
 	return &provider[T]{
 		container: dc,
 		scopeID:   scopeID,
+		name:      name,
 	}
 }

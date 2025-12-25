@@ -15,6 +15,8 @@ graph TB
         RegisterRuntime[di.RegisterRuntime]
         BindInterface[di.BindInterface]
         ResolveNamed[di.ResolveNamed]
+        Validate[di.Validate]
+        Override[di.Override]
     end
     
     subgraph "Container Layer"
@@ -30,6 +32,7 @@ graph TB
         ScopedCache[Scoped Cache]
         Creating[Creating Tracker]
         Bindings[Interface Bindings]
+        NamedCaches[Named Instance Caches]
     end
     
     Init --> RegMgr
@@ -38,13 +41,17 @@ graph TB
     ResolveScoped --> ResMgr
     RegisterRuntime --> RegMgr
     GetProvider --> ResMgr
+    Validate --> DC
+    Override --> RegMgr
     
     RegMgr --> Constructors
     ResMgr --> Singletons
     ResMgr --> ScopedCache
     ResMgr --> Creating
     ResMgr --> Bindings
+    ResMgr --> NamedCaches
     ScopeMgr --> ScopedCache
+    ScopeMgr --> NamedCaches
     
     DC --> RegMgr
     DC --> ResMgr
@@ -65,6 +72,9 @@ Central component that manages all dependencies.
 - `resolutionStack`: Dependency chain for error reporting
 - `interfaceBindings`: Unnamed interface → concrete type mapping
 - `namedInterfaceBindings`: Named interface bindings (name → interface → type)
+- `namedConstructors`: Named concrete type constructors
+- `namedDependencies`: Named singleton instance cache
+- `namedScopedInstances`: Named scoped instance cache
 
 **Thread Safety:**
 - Uses `sync.RWMutex` for concurrent access
@@ -79,6 +89,7 @@ Holds constructor metadata.
 type Registration struct {
     constructor func(*DependencyContainer, string) (interface{}, error)
     scope       Scope
+    paramTypes  []reflect.Type // Metadata for validation
 }
 ```
 
@@ -166,6 +177,7 @@ flowchart TD
     ReturnInstance --> End
     ScopeError --> End
     CircularError --> End
+```
 
 ### Interface-Based Resolution
 
@@ -178,6 +190,38 @@ flowchart TD
     UseScope --> End([Done])
     
     ContinueNormal --> End
+```
+
+### Eager Graph Validation
+
+DepWeaver employs a **Validation on Mutation** strategy. Every function that modifies the dependency graph—including `Init`, `RegisterRuntime`, `Override`, and `BindInterface`—automatically triggers a full graph validation. This ensures that the container never enters an invalid state (cycles or missing dependencies).
+
+```mermaid
+flowchart TD
+    Start([Validate Graph]) --> Loop[Iterate All Constructors]
+    Loop --> Visit[Visit Type T]
+    Visit --> CheckCycle{In Progress?}
+    CheckCycle -->|Yes| CycleErr[Return Cycle Error]
+    CheckCycle -->|No| MarkProgress[Mark In Progress]
+    MarkProgress --> CheckDeps[Visit Dependency Types]
+    CheckDeps --> UnmarkProgress[Unmark In Progress]
+    UnmarkProgress --> MarkVisited[Mark Visited]
+    MarkVisited --> CheckMissing{Missing Constructor?}
+    CheckMissing -->|Yes| MissingErr[Return Missing Error]
+    CheckMissing -->|No| Next[Next Registration]
+    
+    Next --> End([Done])
+```
+
+### Test Overrides
+
+```mermaid
+flowchart TD
+    Start([Override Type T]) --> ReplaceReg[Replace Constructor]
+    ReplaceReg --> ClearCache[Clear Cache for T]
+    ClearCache --> ClearSingletons[Remove T from Singleton Cache]
+    ClearSingletons --> ClearScoped[Remove T from Scoped Caches]
+    ClearScoped --> End([Done])
 ```
 
 ## Provider Pattern

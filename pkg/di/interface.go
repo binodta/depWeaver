@@ -6,25 +6,25 @@ import (
 )
 
 // BindInterface binds an interface type to a concrete implementation
-// @Param I - interface type
-// @Param C - concrete type that implements the interface
 func BindInterface[I any, C any]() error {
 	interfaceType := reflect.TypeOf((*I)(nil)).Elem()
 	concreteType := reflect.TypeOf((*C)(nil)).Elem()
 
-	return dependencyContainer.BindInterface(interfaceType, concreteType)
+	if err := dependencyContainer.BindInterface(interfaceType, concreteType); err != nil {
+		return err
+	}
+	return Validate()
 }
 
 // BindInterfaceNamed binds an interface type to a concrete implementation with a name
-// This allows multiple implementations of the same interface
-// @Param name - unique name for this binding
-// @Param I - interface type
-// @Param C - concrete type that implements the interface
 func BindInterfaceNamed[I any, C any](name string) error {
 	interfaceType := reflect.TypeOf((*I)(nil)).Elem()
 	concreteType := reflect.TypeOf((*C)(nil)).Elem()
 
-	return dependencyContainer.BindInterfaceNamed(name, interfaceType, concreteType)
+	if err := dependencyContainer.BindInterfaceNamed(name, interfaceType, concreteType); err != nil {
+		return err
+	}
+	return Validate()
 }
 
 // ResolveNamed resolves a dependency by name (for named interface bindings)

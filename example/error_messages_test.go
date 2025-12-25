@@ -80,11 +80,9 @@ func TestMissingDependency(t *testing.T) {
 	}
 
 	// Only register the service, not its dependency
-	di.Init([]interface{}{NewServiceWithMissing})
-
-	_, err := di.Resolve[*ServiceWithMissing]()
+	err := di.Init([]interface{}{NewServiceWithMissing})
 	if err == nil {
-		t.Fatal("Expected error when dependency is missing")
+		t.Fatal("Expected error during Init when dependency is missing")
 	}
 
 	errMsg := err.Error()

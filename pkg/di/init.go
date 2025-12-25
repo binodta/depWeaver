@@ -15,53 +15,94 @@ type ScopeRegistration struct {
 }
 
 // Init Register all constructors with Singleton scope (backward compatible)
-// @Param constructors []interface{} - list of constructors
-func Init(constructors []interface{}) {
+func Init(constructors []interface{}) error {
 	for _, constructor := range constructors {
 		if err := dependencyContainer.RegisterConstructor(constructor); err != nil {
-			log.Fatalf("Failed to register constructor: %v", err)
+			return err
 		}
+	}
+	return Validate()
+}
+
+// MustInit registers constructors and immediately validates the graph, crashing on error
+func MustInit(constructors []interface{}) {
+	if err := Init(constructors); err != nil {
+		log.Fatalf("Dependency graph initialization failed: %v", err)
 	}
 }
 
 // InitWithScope registers constructors with specific scopes
-// @Param registrations []ScopeRegistration - list of constructor registrations with scopes
-func InitWithScope(registrations []ScopeRegistration) {
+func InitWithScope(registrations []ScopeRegistration) error {
 	for _, reg := range registrations {
 		if err := dependencyContainer.RegisterConstructorWithScope(reg.Constructor, reg.Scope); err != nil {
-			log.Fatalf("Failed to register constructor: %v", err)
+			return err
 		}
+	}
+	return Validate()
+}
+
+// MustInitWithScope registers constructors with scopes and immediately validates the graph, crashing on error
+func MustInitWithScope(registrations []ScopeRegistration) {
+	if err := InitWithScope(registrations); err != nil {
+		log.Fatalf("Dependency graph initialization failed: %v", err)
 	}
 }
 
 // RegisterRuntime allows runtime registration of constructors after initialization
-// @Param constructor interface{} - constructor function
-// @Param scope container.Scope - lifetime scope for the dependency
 func RegisterRuntime(constructor interface{}, scope container.Scope) error {
-	return dependencyContainer.RegisterRuntimeConstructor(constructor, scope)
+	if err := dependencyContainer.RegisterRuntimeConstructor(constructor, scope); err != nil {
+		return err
+	}
+	return Validate()
 }
 
 // RegisterRuntimeBatch allows runtime registration of multiple constructors after initialization
-// @Param constructors []interface{} - list of constructor functions
-// @Param scope container.Scope - lifetime scope for all dependencies
 func RegisterRuntimeBatch(constructors []interface{}, scope container.Scope) error {
 	for _, constructor := range constructors {
 		if err := dependencyContainer.RegisterRuntimeConstructor(constructor, scope); err != nil {
 			return err
 		}
 	}
-	return nil
+	return Validate()
 }
 
-// RegisterRuntimeWithScopes allows runtime registration of multiple constructors with individual scopes
-// @Param registrations []ScopeRegistration - list of constructor registrations with scopes
+// RegisterRuntimeWithScopes registers multiple constructors with individual scopes at runtime
 func RegisterRuntimeWithScopes(registrations []ScopeRegistration) error {
 	for _, reg := range registrations {
 		if err := dependencyContainer.RegisterRuntimeConstructor(reg.Constructor, reg.Scope); err != nil {
 			return err
 		}
 	}
-	return nil
+	return Validate()
+}
+
+// RegisterNamedConstructor registers a constructor with a specific name and scope
+func RegisterNamedConstructor(name string, constructor interface{}, scope container.Scope) error {
+	if err := dependencyContainer.RegisterNamedConstructorWithScope(name, constructor, scope); err != nil {
+		return err
+	}
+	return Validate()
+}
+
+// Override replaces an existing constructor and clears any cached instances
+func Override(constructor interface{}, scope container.Scope) error {
+	if err := dependencyContainer.OverrideConstructor(constructor, scope); err != nil {
+		return err
+	}
+	return Validate()
+}
+
+// OverrideNamed replaces an existing named constructor and clears any cached instances
+func OverrideNamed(name string, constructor interface{}, scope container.Scope) error {
+	if err := dependencyContainer.RegisterNamedConstructorWithScope(name, constructor, scope); err != nil {
+		return err
+	}
+	return Validate()
+}
+
+// Validate eagerly checks the dependency graph for missing registrations or cycles
+func Validate() error {
+	return dependencyContainer.Validate()
 }
 
 // Reset clears the container state (useful for testing)

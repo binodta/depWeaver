@@ -55,8 +55,13 @@ func ResolveScoped[T interface{}](scopeID string) (T, error) {
 
 // GetProvider returns a provider for lazy resolution
 // @Param scopeID string - scope context identifier (empty string for default scope)
-func GetProvider[T interface{}](scopeID string) container.Provider[T] {
-	return container.NewProvider[T](dependencyContainer, scopeID)
+func GetProvider[T any](scopeID string) container.Provider[T] {
+	return container.NewProvider[T](dependencyContainer, scopeID, "")
+}
+
+// GetProviderNamed returns a provider for lazy resolution of a named dependency
+func GetProviderNamed[T any](name string) container.Provider[T] {
+	return container.NewProvider[T](dependencyContainer, "", name)
 }
 
 // CreateScope creates a new scope context and returns its ID
@@ -68,4 +73,10 @@ func CreateScope() string {
 // @Param scopeID string - scope context identifier to destroy
 func DestroyScope(scopeID string) {
 	dependencyContainer.DestroyScope(scopeID)
+}
+
+// DestroyAllScopes cleans up all active scope contexts
+// Useful for application teardown or forced cleanup
+func DestroyAllScopes() {
+	dependencyContainer.DestroyAllScopes()
 }

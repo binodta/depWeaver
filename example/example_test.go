@@ -2,8 +2,9 @@ package main
 
 import (
 	"fmt"
-	"github.com/binodta/depWeaver/pkg/di"
 	"testing"
+
+	"github.com/binodta/depWeaver/pkg/di"
 )
 
 // Config Configuration management
@@ -79,7 +80,7 @@ func main() {
 		NewLoggerService,
 		NewUserRepository,
 	}
-	di.Init(constructors)
+	di.MustInit(constructors)
 	service, _ := di.Resolve[*UserService]()
 	fmt.Printf("UserService created successfully\n")
 	fmt.Printf("Database URL: %s\n", service.repo.db.Url)
@@ -87,5 +88,6 @@ func main() {
 }
 
 func Test(t *testing.T) {
+	di.Reset()
 	main()
 }

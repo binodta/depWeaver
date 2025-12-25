@@ -62,16 +62,15 @@ func NewSelfReferencing(self *SelfReferencing) *SelfReferencing {
 
 // TestCircularDependencyTwoTypes tests A -> B -> A circular dependency
 func TestCircularDependencyTwoTypes(t *testing.T) {
+	di.Reset()
 	constructors := []interface{}{
 		NewServiceA,
 		NewServiceB,
 	}
 
-	di.Init(constructors)
-
-	_, err := di.Resolve[*ServiceA]()
+	err := di.Init(constructors)
 	if err == nil {
-		t.Fatal("Expected circular dependency error, but got nil")
+		t.Fatal("Expected circular dependency error during Init, but got nil")
 	}
 
 	errMsg := err.Error()
@@ -89,17 +88,16 @@ func TestCircularDependencyTwoTypes(t *testing.T) {
 
 // TestCircularDependencyThreeTypes tests A -> B -> C -> A circular dependency
 func TestCircularDependencyThreeTypes(t *testing.T) {
+	di.Reset()
 	constructors := []interface{}{
 		NewComponentA,
 		NewComponentB,
 		NewComponentC,
 	}
 
-	di.Init(constructors)
-
-	_, err := di.Resolve[*ComponentA]()
+	err := di.Init(constructors)
 	if err == nil {
-		t.Fatal("Expected circular dependency error, but got nil")
+		t.Fatal("Expected circular dependency error during Init, but got nil")
 	}
 
 	errMsg := err.Error()
@@ -119,15 +117,14 @@ func TestCircularDependencyThreeTypes(t *testing.T) {
 
 // TestSelfReferencingCircularDependency tests self-referencing circular dependency
 func TestSelfReferencingCircularDependency(t *testing.T) {
+	di.Reset()
 	constructors := []interface{}{
 		NewSelfReferencing,
 	}
 
-	di.Init(constructors)
-
-	_, err := di.Resolve[*SelfReferencing]()
+	err := di.Init(constructors)
 	if err == nil {
-		t.Fatal("Expected circular dependency error, but got nil")
+		t.Fatal("Expected circular dependency error during Init, but got nil")
 	}
 
 	errMsg := err.Error()
@@ -146,17 +143,16 @@ func TestSelfReferencingCircularDependency(t *testing.T) {
 // TestCircularDependencyFromDifferentEntryPoints tests that circular dependencies
 // are detected regardless of which type is resolved first
 func TestCircularDependencyFromDifferentEntryPoints(t *testing.T) {
+	di.Reset()
 	// Test resolving ServiceB first (instead of ServiceA)
 	constructors := []interface{}{
 		NewServiceA,
 		NewServiceB,
 	}
 
-	di.Init(constructors)
-
-	_, err := di.Resolve[*ServiceB]()
+	err := di.Init(constructors)
 	if err == nil {
-		t.Fatal("Expected circular dependency error when resolving ServiceB, but got nil")
+		t.Fatal("Expected circular dependency error during Init, but got nil")
 	}
 
 	errMsg := err.Error()
