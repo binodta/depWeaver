@@ -6,34 +6,34 @@ import (
 )
 
 // Resolve public method to resolve dependencies (uses default/empty scope)
-// @Param t reflect.Type - type of the dependency
 func (dc *DependencyContainer) Resolve(t reflect.Type) (interface{}, error) {
-	return dc.resolveWithScope(t, "")
+	return dc.resolveWithScope(t, "", nil)
 }
 
 // ResolveWithScope public method to resolve dependencies with a specific scope
-// @Param t reflect.Type - type of the dependency
-// @Param scopeID string - scope context identifier
 func (dc *DependencyContainer) ResolveWithScope(t reflect.Type, scopeID string) (interface{}, error) {
-	return dc.resolveWithScope(t, scopeID)
+	return dc.resolveWithScope(t, scopeID, nil)
 }
 
 // resolveWithScope pkg method to resolve dependencies with scope support
-// @Param t reflect.Type - type of the dependency
-// @Param scopeID string - scope context identifier (empty string for default scope)
-// @Return interface{} - instance of the dependency
-func (dc *DependencyContainer) resolveWithScope(t reflect.Type, scopeID string) (interface{}, error) {
+// @Param stack []reflect.Type - Call stack for the CURRENT resolution chain (local to goroutine)
+func (dc *DependencyContainer) resolveWithScope(t reflect.Type, scopeID string, stack []reflect.Type) (interface{}, error) {
 	// Check if this is an interface type with a binding
 	if t.Kind() == reflect.Interface {
 		concreteType, exists := dc.GetInterfaceBinding(t)
 		if exists {
-			// Resolve the concrete type instead
-			return dc.resolveWithScope(concreteType, scopeID)
+			return dc.resolveWithScope(concreteType, scopeID, stack)
 		}
-		// If no binding found, continue with normal resolution (will likely fail)
 	}
 
-	// Find the registration for this type
+	// 1. Check for circular dependencies in the CURRENT call stack
+	for _, stackType := range stack {
+		if stackType == t {
+			return nil, fmt.Errorf("circular dependency detected: %s", dc.formatDependencyChain(t, stack))
+		}
+	}
+
+	// 2. Find the registration for this type
 	dc.mu.RLock()
 	registration, exists := dc.constructors[t]
 	dc.mu.RUnlock()
@@ -42,65 +42,74 @@ func (dc *DependencyContainer) resolveWithScope(t reflect.Type, scopeID string) 
 		return nil, fmt.Errorf("no constructor registered for type %v", t)
 	}
 
-	// Handle different scopes
+	// Update stack
+	newStack := append(stack, t)
+
+	// 3. Handle different scopes
 	switch registration.scope {
 	case Singleton:
-		return dc.resolveSingleton(t, registration, scopeID)
+		return dc.resolveSingleton(t, registration, scopeID, newStack)
 	case Transient:
-		return dc.resolveTransient(t, registration, scopeID)
+		return dc.resolveTransient(t, registration, scopeID, newStack)
 	case Scoped:
-		return dc.resolveScoped(t, registration, scopeID)
+		return dc.resolveScoped(t, registration, scopeID, newStack)
 	default:
 		return nil, fmt.Errorf("unknown scope type for %v", t)
 	}
 }
 
 // resolveSingleton resolves a singleton dependency (created once and cached)
-func (dc *DependencyContainer) resolveSingleton(t reflect.Type, registration *Registration, scopeID string) (interface{}, error) {
-	// Fast path: try read lock to return already-built singletons
+func (dc *DependencyContainer) resolveSingleton(t reflect.Type, registration *Registration, scopeID string, stack []reflect.Type) (interface{}, error) {
+	// 1. Fast path: read lock
 	dc.mu.RLock()
 	if dep, exists := dc.dependencies[t]; exists {
 		dc.mu.RUnlock()
 		return dep, nil
 	}
+
+	// 2. Check if another goroutine is already building this
+	waitChan, inProg := dc.inProgress[t]
 	dc.mu.RUnlock()
 
-	// Slow path: acquire write lock to safely check/create
-	dc.mu.Lock()
+	if inProg {
+		<-waitChan           // Wait for the builder to finish
+		return dc.Resolve(t) // Recursive call (will hit fast path)
+	}
 
-	// Double-check after acquiring the write lock
+	// 3. Slow path: become the builder
+	dc.mu.Lock()
+	// Double check
 	if dep, exists := dc.dependencies[t]; exists {
 		dc.mu.Unlock()
 		return dep, nil
 	}
-
-	// Check for circular dependencies with detailed error reporting
-	if dc.creating[t] {
+	if waitChan, inProg = dc.inProgress[t]; inProg {
 		dc.mu.Unlock()
-		return nil, fmt.Errorf("circular dependency detected: %s", dc.formatDependencyChain(t))
+		<-waitChan
+		return dc.Resolve(t)
 	}
 
-	// Mark as currently being created to prevent recursion
-	dc.creating[t] = true
-	dc.resolutionStack = append(dc.resolutionStack, t)
+	// Mark as in-progress
+	done := make(chan struct{})
+	dc.inProgress[t] = done
 	dc.mu.Unlock()
 
-	// Create the instance
-	instance, err := registration.constructor(dc, scopeID)
-
-	// Clean up resolution tracking
-	dc.mu.Lock()
-	delete(dc.creating, t)
-	if len(dc.resolutionStack) > 0 {
-		dc.resolutionStack = dc.resolutionStack[:len(dc.resolutionStack)-1]
-	}
-
-	if err != nil {
+	// Ensure we close the channel and cleanup even if constructor panics
+	defer func() {
+		dc.mu.Lock()
+		delete(dc.inProgress, t)
+		close(done)
 		dc.mu.Unlock()
+	}()
+
+	// Create the instance
+	instance, err := registration.constructor(dc, scopeID, stack)
+	if err != nil {
 		return nil, err
 	}
 
 	// Store the created instance
+	dc.mu.Lock()
 	dc.dependencies[t] = instance
 	dc.mu.Unlock()
 
@@ -108,44 +117,17 @@ func (dc *DependencyContainer) resolveSingleton(t reflect.Type, registration *Re
 }
 
 // resolveTransient resolves a transient dependency (created every time)
-func (dc *DependencyContainer) resolveTransient(t reflect.Type, registration *Registration, scopeID string) (interface{}, error) {
-	// Check for circular dependencies
-	dc.mu.Lock()
-	if dc.creating[t] {
-		dc.mu.Unlock()
-		return nil, fmt.Errorf("circular dependency detected: %s", dc.formatDependencyChain(t))
-	}
-
-	// Mark as currently being created to prevent recursion
-	dc.creating[t] = true
-	dc.resolutionStack = append(dc.resolutionStack, t)
-	dc.mu.Unlock()
-
-	// Create the instance (always new)
-	instance, err := registration.constructor(dc, scopeID)
-
-	// Clean up resolution tracking
-	dc.mu.Lock()
-	delete(dc.creating, t)
-	if len(dc.resolutionStack) > 0 {
-		dc.resolutionStack = dc.resolutionStack[:len(dc.resolutionStack)-1]
-	}
-	dc.mu.Unlock()
-
-	if err != nil {
-		return nil, err
-	}
-
-	return instance, nil
+func (dc *DependencyContainer) resolveTransient(t reflect.Type, registration *Registration, scopeID string, stack []reflect.Type) (interface{}, error) {
+	// Create the instance (no caching needed, cycle detection already done in resolveWithScope)
+	return registration.constructor(dc, scopeID, stack)
 }
 
 // resolveScoped resolves a scoped dependency (created once per scope context)
-func (dc *DependencyContainer) resolveScoped(t reflect.Type, registration *Registration, scopeID string) (interface{}, error) {
+func (dc *DependencyContainer) resolveScoped(t reflect.Type, registration *Registration, scopeID string, stack []reflect.Type) (interface{}, error) {
 	if scopeID == "" {
 		return nil, fmt.Errorf("scope ID required for scoped dependency %v", t)
 	}
 
-	// Fast path: check if already created in this scope
 	dc.mu.RLock()
 	if scopeCache, exists := dc.scopedInstances[scopeID]; exists {
 		if dep, exists := scopeCache[t]; exists {
@@ -155,64 +137,37 @@ func (dc *DependencyContainer) resolveScoped(t reflect.Type, registration *Regis
 	}
 	dc.mu.RUnlock()
 
-	// Slow path: create the instance
 	dc.mu.Lock()
+	defer dc.mu.Unlock()
 
-	// Double-check after acquiring write lock
+	// Double check
 	if scopeCache, exists := dc.scopedInstances[scopeID]; exists {
 		if dep, exists := scopeCache[t]; exists {
-			dc.mu.Unlock()
 			return dep, nil
 		}
-	}
-
-	// Ensure scope exists
-	if _, exists := dc.scopedInstances[scopeID]; !exists {
+	} else {
 		dc.scopedInstances[scopeID] = make(map[reflect.Type]interface{})
 	}
 
-	// Check for circular dependencies
-	if dc.creating[t] {
-		dc.mu.Unlock()
-		return nil, fmt.Errorf("circular dependency detected: %s", dc.formatDependencyChain(t))
-	}
-
-	// Mark as currently being created
-	dc.creating[t] = true
-	dc.resolutionStack = append(dc.resolutionStack, t)
-	dc.mu.Unlock()
-
 	// Create the instance
-	instance, err := registration.constructor(dc, scopeID)
-
-	// Clean up resolution tracking
-	dc.mu.Lock()
-	delete(dc.creating, t)
-	if len(dc.resolutionStack) > 0 {
-		dc.resolutionStack = dc.resolutionStack[:len(dc.resolutionStack)-1]
-	}
-
+	// Note: Scoped creators don't wait for each other across different scopeIDs.
+	// Within the same scopeID, they are protected by dc.mu.
+	instance, err := registration.constructor(dc, scopeID, stack)
 	if err != nil {
-		dc.mu.Unlock()
 		return nil, err
 	}
 
-	// Store in scope cache
 	dc.scopedInstances[scopeID][t] = instance
-	dc.mu.Unlock()
-
 	return instance, nil
 }
 
-// formatDependencyChain creates a readable string showing the circular dependency path
-// Note: This method should be called while holding the lock
-func (dc *DependencyContainer) formatDependencyChain(circularType reflect.Type) string {
-	if len(dc.resolutionStack) == 0 {
+func (dc *DependencyContainer) formatDependencyChain(circularType reflect.Type, stack []reflect.Type) string {
+	if len(stack) == 0 {
 		return fmt.Sprintf("%v -> %v (circular)", circularType, circularType)
 	}
 
 	chain := ""
-	for i, t := range dc.resolutionStack {
+	for i, t := range stack {
 		if i > 0 {
 			chain += " -> "
 		}

@@ -16,7 +16,7 @@ const (
 
 // Registration holds constructor and scope information
 type Registration struct {
-	constructor func(container *DependencyContainer, scopeID string) (interface{}, error)
+	constructor func(container *DependencyContainer, scopeID string, stack []reflect.Type) (interface{}, error)
 	scope       Scope
 	paramTypes  []reflect.Type // Metadata for validation and analysis
 }
@@ -25,8 +25,7 @@ type DependencyContainer struct {
 	mu              sync.RWMutex
 	dependencies    map[reflect.Type]interface{}            // Singleton cache
 	constructors    map[reflect.Type]*Registration          // Constructor registrations with scope
-	creating        map[reflect.Type]bool                   // Track types being created (circular dependency detection)
-	resolutionStack []reflect.Type                          // Track dependency chain for better error reporting
+	inProgress      map[reflect.Type]chan struct{}          // Track singletons being created for waiting
 	scopedInstances map[string]map[reflect.Type]interface{} // Scoped instances by context ID
 
 	// Interface and Named bindings
@@ -42,8 +41,7 @@ func New() *DependencyContainer {
 	return &DependencyContainer{
 		dependencies:           make(map[reflect.Type]interface{}),
 		constructors:           make(map[reflect.Type]*Registration),
-		creating:               make(map[reflect.Type]bool),
-		resolutionStack:        make([]reflect.Type, 0),
+		inProgress:             make(map[reflect.Type]chan struct{}),
 		scopedInstances:        make(map[string]map[reflect.Type]interface{}),
 		interfaceBindings:      make(map[reflect.Type]reflect.Type),
 		namedInterfaceBindings: make(map[string]map[reflect.Type]reflect.Type),

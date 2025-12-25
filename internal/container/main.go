@@ -53,7 +53,7 @@ func (dc *DependencyContainer) RegisterConstructorWithScope(
 	}
 
 	// Wrap the constructor to work with the container
-	wrappedConstructor := func(container *DependencyContainer, scopeID string) (interface{}, error) {
+	wrappedConstructor := func(container *DependencyContainer, scopeID string, stack []reflect.Type) (interface{}, error) {
 		// Use reflection to call the constructor with dependencies
 		constructorValue := reflect.ValueOf(constructor)
 
@@ -61,7 +61,7 @@ func (dc *DependencyContainer) RegisterConstructorWithScope(
 		args := make([]reflect.Value, numIn)
 		for i := 0; i < numIn; i++ {
 			argType := paramTypes[i]
-			arg, err := container.resolveWithScope(argType, scopeID)
+			arg, err := container.resolveWithScope(argType, scopeID, stack)
 			if err != nil {
 				return nil, fmt.Errorf("error resolving dependency %v (parameter %d of %v): %w", argType, i+1, constructorType, err)
 			}
@@ -160,12 +160,12 @@ func (dc *DependencyContainer) RegisterNamedConstructorWithScope(
 		paramTypes[i] = constructorType.In(i)
 	}
 
-	wrappedConstructor := func(container *DependencyContainer, scopeID string) (interface{}, error) {
+	wrappedConstructor := func(container *DependencyContainer, scopeID string, stack []reflect.Type) (interface{}, error) {
 		constructorValue := reflect.ValueOf(constructor)
 		args := make([]reflect.Value, numIn)
 		for i := 0; i < numIn; i++ {
 			argType := paramTypes[i]
-			arg, err := container.resolveWithScope(argType, scopeID)
+			arg, err := container.resolveWithScope(argType, scopeID, stack)
 			if err != nil {
 				return nil, fmt.Errorf("error resolving dependency %v for named %q: %w", argType, name, err)
 			}

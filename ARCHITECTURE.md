@@ -161,11 +161,7 @@ flowchart TD
     DoubleCheck -->|Cached| ReleaseLock1[Release Lock]
     ReleaseLock1 --> ReturnCached
     DoubleCheck -->|Not Cached| EnsureScope[Ensure Scope Exists]
-    EnsureScope --> CheckCircular{Creating<br/>This Type?}
-    CheckCircular -->|Yes| CircularError[Return Circular<br/>Dependency Error]
-    CheckCircular -->|No| MarkCreating[Mark as Creating]
-    MarkCreating --> ReleaseLock2[Release Lock]
-    ReleaseLock2 --> ResolveDeps[Resolve Dependencies<br/>in Same Scope]
+    EnsureScope --> ResolveDeps[Resolve Dependencies<br/>in Same Scope]
     ResolveDeps --> CallConstructor[Call Constructor]
     CallConstructor --> AcquireLock2[Acquire Write Lock]
     AcquireLock2 --> UnmarkCreating[Unmark Creating]
@@ -288,14 +284,16 @@ sequenceDiagram
 
 ## Circular Dependency Detection
 
+During resolution, DepWeaver maintains a **local** call stack (isolated per goroutine/request). If a type is encountered that is already in the current stack, a circular dependency error is returned.
+
 ```mermaid
 flowchart TD
-    Start([Resolve A]) --> MarkA[Mark A as Creating]
-    MarkA --> ResolveB[Resolve Dependency B]
-    ResolveB --> CheckB{B Creating?}
-    CheckB -->|No| MarkB[Mark B as Creating]
-    MarkB --> ResolveA[Resolve Dependency A]
-    ResolveA --> CheckA{A Creating?}
+    Start([Resolve A]) --> PushA[Add A to Stack]
+    PushA --> ResolveB[Resolve Dependency B]
+    ResolveB --> CheckB{B in Stack?}
+    CheckB -->|No| PushB[Add B to Stack]
+    PushB --> ResolveA[Resolve Dependency A]
+    ResolveA --> CheckA{A in Stack?}
     CheckA -->|Yes| Error[Circular Dependency Error:<br/>A → B → A]
     CheckA -->|No| Continue[Continue...]
     CheckB -->|Yes| Error2[Circular Dependency Error]
@@ -306,48 +304,26 @@ flowchart TD
 
 ## Thread Safety Strategy
 
-### Read-Write Lock Pattern
+### Local Resolution Stacks
 
-```mermaid
-flowchart LR
-    subgraph "Fast Path - Read Lock"
-        R1[Acquire RLock]
-        R2[Check Cache]
-        R3{Found?}
-        R4[Release RLock]
-        R5[Return Instance]
-        
-        R1 --> R2 --> R3
-        R3 -->|Yes| R4 --> R5
-    end
-    
-    subgraph "Slow Path - Write Lock"
-        W1[Acquire Lock]
-        W2[Double Check]
-        W3{Still Missing?}
-        W4[Mark Creating]
-        W5[Release Lock]
-        W6[Create Instance]
-        W7[Acquire Lock]
-        W8[Cache Instance]
-        W9[Release Lock]
-        
-        R3 -->|No| W1
-        W1 --> W2 --> W3
-        W3 -->|Yes| W4 --> W5 --> W6 --> W7 --> W8 --> W9
-        W3 -->|No| W9
-    end
-```
+Circular dependency detection is performed using a local stack passed through each resolution request. This ensures that:
+- Each goroutine/request has its own independent cycle detection.
+- Concurrent resolutions of different types never collide.
+- Concurrent resolutions of the same type are correctly identified as safe, not circular.
 
-### Concurrent Resolution
+### Channel-based Singleton Synchronization
 
-Multiple goroutines can:
-- ✅ Read cached singletons concurrently (RLock)
-- ✅ Create different types concurrently (separate locks per type)
-- ✅ Resolve transients concurrently (no caching)
-- ✅ Use different scopes concurrently (separate scope caches)
+When multiple goroutines resolve the same singleton simultaneously:
+1. The first goroutine starts the creation process and opens an `inProgress` channel.
+2. Subsequent goroutines see the `inProgress` channel and wait on it.
+3. Once the first goroutine finishes, it caches the instance and closes the channel.
+4. All waiting goroutines receive the signal, resume, and return the cached instance.
 
-Only one goroutine creates a singleton instance (double-checked locking).
+### Performance characteristics
+
+- **Read-Heavy**: Uses `RWMutex` to allow concurrent reads of cached singletons.
+- **Race-Free Creation**: Ensures only one instance is ever created for each singleton.
+- **Zero False-Positives**: Eliminates "circular dependency" errors caused by inter-goroutine interference.
 
 ## Performance Characteristics
 

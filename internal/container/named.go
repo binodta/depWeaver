@@ -7,25 +7,23 @@ import (
 
 // ResolveNamed resolves a dependency by name (for named interface bindings)
 func (dc *DependencyContainer) ResolveNamed(name string, t reflect.Type) (interface{}, error) {
-	return dc.resolveNamedWithScope(name, t, "")
+	return dc.resolveNamedWithScope(name, t, "", nil)
 }
 
 // ResolveNamedWithScope resolves a named dependency with a specific scope
 func (dc *DependencyContainer) ResolveNamedWithScope(name string, t reflect.Type, scopeID string) (interface{}, error) {
-	return dc.resolveNamedWithScope(name, t, scopeID)
+	return dc.resolveNamedWithScope(name, t, scopeID, nil)
 }
 
 // resolveNamedWithScope internal method to resolve named dependencies
-func (dc *DependencyContainer) resolveNamedWithScope(name string, t reflect.Type, scopeID string) (interface{}, error) {
+func (dc *DependencyContainer) resolveNamedWithScope(name string, t reflect.Type, scopeID string, stack []reflect.Type) (interface{}, error) {
 	// 1. Check if this is an interface type with a named binding
 	if t.Kind() == reflect.Interface {
 		concreteType, exists := dc.GetNamedInterfaceBinding(name, t)
 		if exists {
 			// Resolve the concrete type instead
-			return dc.resolveWithScope(concreteType, scopeID)
+			return dc.resolveWithScope(concreteType, scopeID, stack)
 		}
-		// If it's an interface but no binding found, we still check namedConstructors
-		// maybe someone registered an interface return type directly with a name?
 	}
 
 	// 2. Find the registration in namedConstructors
@@ -43,23 +41,24 @@ func (dc *DependencyContainer) resolveNamedWithScope(name string, t reflect.Type
 			return nil, fmt.Errorf("no binding found for interface %v with name %q", t, name)
 		}
 		// Fallback: Resolve normally (unnamed)
-		return dc.resolveWithScope(t, scopeID)
+		return dc.resolveWithScope(t, scopeID, stack)
 	}
 
 	// 3. Handle named resolution with separate caches
 	switch registration.scope {
 	case Singleton:
-		return dc.resolveNamedSingleton(name, t, registration)
+		return dc.resolveNamedSingleton(name, t, registration, stack)
 	case Transient:
-		return registration.constructor(dc, scopeID) // Transients don't need named-specific logic for creation
+		return registration.constructor(dc, scopeID, stack)
 	case Scoped:
-		return dc.resolveNamedScoped(name, t, registration, scopeID)
+		return dc.resolveNamedScoped(name, t, registration, scopeID, stack)
 	default:
 		return nil, fmt.Errorf("unknown scope type for named %v", t)
 	}
 }
 
-func (dc *DependencyContainer) resolveNamedSingleton(name string, t reflect.Type, registration *Registration) (interface{}, error) {
+func (dc *DependencyContainer) resolveNamedSingleton(name string, t reflect.Type, registration *Registration, stack []reflect.Type) (interface{}, error) {
+	// Fast path
 	dc.mu.RLock()
 	if typeMap, exists := dc.namedDependencies[name]; exists {
 		if dep, exists := typeMap[t]; exists {
@@ -69,6 +68,10 @@ func (dc *DependencyContainer) resolveNamedSingleton(name string, t reflect.Type
 	}
 	dc.mu.RUnlock()
 
+	// Slow path: For named singletons, we also use the ResolveNamed entry point
+	// which will call resolveNamedWithScope -> resolveNamedSingleton.
+	// We need to protect against concurrent creation of named singletons too.
+	// For simplicity, we can use the same dc.mu Lock for the whole creation.
 	dc.mu.Lock()
 	defer dc.mu.Unlock()
 
@@ -78,11 +81,13 @@ func (dc *DependencyContainer) resolveNamedSingleton(name string, t reflect.Type
 			return dep, nil
 		}
 	} else {
-		dc.namedDependencies[name] = make(map[reflect.Type]interface{})
+		if dc.namedDependencies[name] == nil {
+			dc.namedDependencies[name] = make(map[reflect.Type]interface{})
+		}
 	}
 
 	// Create instance
-	instance, err := registration.constructor(dc, "")
+	instance, err := registration.constructor(dc, "", stack)
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +96,7 @@ func (dc *DependencyContainer) resolveNamedSingleton(name string, t reflect.Type
 	return instance, nil
 }
 
-func (dc *DependencyContainer) resolveNamedScoped(name string, t reflect.Type, registration *Registration, scopeID string) (interface{}, error) {
+func (dc *DependencyContainer) resolveNamedScoped(name string, t reflect.Type, registration *Registration, scopeID string, stack []reflect.Type) (interface{}, error) {
 	if scopeID == "" {
 		return nil, fmt.Errorf("scope ID required for named scoped dependency %v (%s)", t, name)
 	}
@@ -124,7 +129,7 @@ func (dc *DependencyContainer) resolveNamedScoped(name string, t reflect.Type, r
 	}
 
 	// Create instance
-	instance, err := registration.constructor(dc, scopeID)
+	instance, err := registration.constructor(dc, scopeID, stack)
 	if err != nil {
 		return nil, err
 	}
