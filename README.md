@@ -150,6 +150,16 @@ func main() {
 - Useful for plugins or dynamic dependencies
 - Thread-safe
 
+**`di.RegisterRuntimeBatch(constructors []interface{}, scope container.Scope) error`**
+- Register multiple constructors at runtime with same scope
+- All constructors get the same lifetime scope
+- Returns error if any registration fails
+
+**`di.RegisterRuntimeWithScopes(registrations []ScopeRegistration) error`**
+- Register multiple constructors with individual scopes
+- Each constructor can have different lifetime
+- Returns error if any registration fails
+
 **`di.Reset()`**
 - Clear all registrations and cached instances
 - Primarily for testing purposes
@@ -212,13 +222,35 @@ Register dependencies dynamically after initialization:
 // Initialize base dependencies
 di.Init([]interface{}{NewConfig, NewLogger})
 
-// Later, register plugin
+// Later, register a single plugin
 pluginConstructor := func(cfg *Config) *Plugin {
     return &Plugin{Config: cfg}
 }
 
 err := di.RegisterRuntime(pluginConstructor, container.Singleton)
 plugin, _ := di.Resolve[*Plugin]()
+```
+
+**Batch Registration:**
+
+```go
+// Register multiple constructors with same scope
+constructors := []interface{}{
+    NewPluginA,
+    NewPluginB,
+    NewPluginC,
+}
+
+err := di.RegisterRuntimeBatch(constructors, container.Singleton)
+
+// Or register with different scopes
+registrations := []di.ScopeRegistration{
+    {Constructor: NewPluginA, Scope: container.Singleton},
+    {Constructor: NewPluginB, Scope: container.Transient},
+    {Constructor: NewPluginC, Scope: container.Scoped},
+}
+
+err := di.RegisterRuntimeWithScopes(registrations)
 ```
 
 ### HTTP Request Scoping Example

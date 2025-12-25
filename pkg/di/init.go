@@ -41,6 +41,29 @@ func RegisterRuntime(constructor interface{}, scope container.Scope) error {
 	return dependencyContainer.RegisterRuntimeConstructor(constructor, scope)
 }
 
+// RegisterRuntimeBatch allows runtime registration of multiple constructors after initialization
+// @Param constructors []interface{} - list of constructor functions
+// @Param scope container.Scope - lifetime scope for all dependencies
+func RegisterRuntimeBatch(constructors []interface{}, scope container.Scope) error {
+	for _, constructor := range constructors {
+		if err := dependencyContainer.RegisterRuntimeConstructor(constructor, scope); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// RegisterRuntimeWithScopes allows runtime registration of multiple constructors with individual scopes
+// @Param registrations []ScopeRegistration - list of constructor registrations with scopes
+func RegisterRuntimeWithScopes(registrations []ScopeRegistration) error {
+	for _, reg := range registrations {
+		if err := dependencyContainer.RegisterRuntimeConstructor(reg.Constructor, reg.Scope); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Reset clears the container state (useful for testing)
 func Reset() {
 	dependencyContainer = container.New()

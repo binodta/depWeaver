@@ -24,17 +24,23 @@ func (dc *DependencyContainer) RegisterConstructorWithScope(
 	defer dc.mu.Unlock()
 
 	constructorType := reflect.TypeOf(constructor)
+
+	// Special case: detect if someone passed a slice of constructors
+	if constructorType != nil && (constructorType.Kind() == reflect.Slice || constructorType.Kind() == reflect.Array) {
+		return fmt.Errorf("constructor must be a function, got %v. Did you mean to pass individual constructors instead of a slice? Use InitWithScope() or spread the slice elements", constructorType)
+	}
+
 	if constructorType.Kind() != reflect.Func {
-		return fmt.Errorf("constructor must be a function")
+		return fmt.Errorf("constructor must be a function, got %T", constructor)
 	}
 
 	// Validate constructor signature: must return (T) or (T, error)
 	if constructorType.NumOut() == 0 || constructorType.NumOut() > 2 {
-		return fmt.Errorf("constructor must return either (T) or (T, error)")
+		return fmt.Errorf("constructor %v must return either (T) or (T, error), but returns %d values", constructorType, constructorType.NumOut())
 	}
 	if constructorType.NumOut() == 2 {
 		if !constructorType.Out(1).Implements(reflect.TypeOf((*error)(nil)).Elem()) {
-			return fmt.Errorf("second return value must be of type error")
+			return fmt.Errorf("constructor %v: second return value must be of type error, got %v", constructorType, constructorType.Out(1))
 		}
 	}
 
@@ -53,7 +59,7 @@ func (dc *DependencyContainer) RegisterConstructorWithScope(
 			argType := constructorType.In(i)
 			arg, err := container.resolveWithScope(argType, scopeID)
 			if err != nil {
-				return nil, fmt.Errorf("error resolving dependency for %v: %v", argType, err)
+				return nil, fmt.Errorf("error resolving dependency %v (parameter %d of %v): %w", argType, i+1, constructorType, err)
 			}
 			args[i] = reflect.ValueOf(arg)
 		}
