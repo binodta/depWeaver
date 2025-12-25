@@ -7,9 +7,9 @@ import (
 	"github.com/binodta/depWeaver/pkg/di"
 )
 
-type BatchServiceA struct{}
-type BatchServiceB struct{}
-type BatchServiceC struct{}
+type BatchServiceA struct{ id int }
+type BatchServiceB struct{ id int }
+type BatchServiceC struct{ id int }
 
 func NewBatchServiceA() *BatchServiceA { return &BatchServiceA{} }
 func NewBatchServiceB() *BatchServiceB { return &BatchServiceB{} }

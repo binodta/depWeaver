@@ -23,6 +23,16 @@ func (dc *DependencyContainer) ResolveWithScope(t reflect.Type, scopeID string) 
 // @Param scopeID string - scope context identifier (empty string for default scope)
 // @Return interface{} - instance of the dependency
 func (dc *DependencyContainer) resolveWithScope(t reflect.Type, scopeID string) (interface{}, error) {
+	// Check if this is an interface type with a binding
+	if t.Kind() == reflect.Interface {
+		concreteType, exists := dc.GetInterfaceBinding(t)
+		if exists {
+			// Resolve the concrete type instead
+			return dc.resolveWithScope(concreteType, scopeID)
+		}
+		// If no binding found, continue with normal resolution (will likely fail)
+	}
+
 	// Find the registration for this type
 	dc.mu.RLock()
 	registration, exists := dc.constructors[t]

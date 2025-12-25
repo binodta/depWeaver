@@ -27,15 +27,21 @@ type DependencyContainer struct {
 	creating        map[reflect.Type]bool                   // Track types being created (circular dependency detection)
 	resolutionStack []reflect.Type                          // Track dependency chain for better error reporting
 	scopedInstances map[string]map[reflect.Type]interface{} // Scoped instances by context ID
+
+	// Interface bindings
+	interfaceBindings      map[reflect.Type]reflect.Type            // Unnamed interface -> concrete type bindings
+	namedInterfaceBindings map[string]map[reflect.Type]reflect.Type // Named bindings: name -> (interface -> concrete)
 }
 
 // New creates a new dependency container
 func New() *DependencyContainer {
 	return &DependencyContainer{
-		dependencies:    make(map[reflect.Type]interface{}),
-		constructors:    make(map[reflect.Type]*Registration),
-		creating:        make(map[reflect.Type]bool),
-		resolutionStack: make([]reflect.Type, 0),
-		scopedInstances: make(map[string]map[reflect.Type]interface{}),
+		dependencies:           make(map[reflect.Type]interface{}),
+		constructors:           make(map[reflect.Type]*Registration),
+		creating:               make(map[reflect.Type]bool),
+		resolutionStack:        make([]reflect.Type, 0),
+		scopedInstances:        make(map[string]map[reflect.Type]interface{}),
+		interfaceBindings:      make(map[reflect.Type]reflect.Type),
+		namedInterfaceBindings: make(map[string]map[reflect.Type]reflect.Type),
 	}
 }

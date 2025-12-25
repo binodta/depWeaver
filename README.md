@@ -8,6 +8,7 @@ Lightweight, reflection-powered dependency injection for Go with runtime resolut
 - **Constructor-based injection** - Order independent registration
 - **Flexible return types** - Supports `T` or `(T, error)` signatures
 - **Scope management** - Singleton, Transient, and Scoped lifetimes
+- **Interface-based resolution** - Bind interfaces to concrete implementations
 - **Lazy loading** - Provider pattern for deferred dependency creation
 - **Runtime registration** - Register dependencies dynamically
 - **Circular dependency detection** - Clear error messages with dependency chains
@@ -132,6 +133,24 @@ func main() {
 - Clean up scope and its cached instances
 - Should be called when scope is no longer needed
 
+### Interface Binding API
+
+**`di.BindInterface[I any, C any]() error`**
+- Bind interface type `I` to concrete type `C`
+- `C` must have a registered constructor
+- `C` must implement `I`
+
+**`di.BindInterfaceNamed[I any, C any](name string) error`**
+- Bind interface type `I` to concrete type `C` with a unique name
+- Allows multiple implementations of the same interface
+
+**`di.ResolveNamed[T any](name string) (T, error)`**
+- Resolve a named interface binding
+- Used for multiple implementations
+
+**`di.ResolveNamedScoped[T any](name string, scopeID string) (T, error)`**
+- Resolve a named interface binding within a specific scope
+
 ### Lazy Loading API
 
 **`di.GetProvider[T](scopeID string) container.Provider[T]`**
@@ -253,6 +272,39 @@ registrations := []di.ScopeRegistration{
 err := di.RegisterRuntimeWithScopes(registrations)
 ```
 
+### Interface-Based Resolution
+
+Bind an interface to a concrete implementation:
+
+```go
+type Repository interface {
+    Save(data string) error
+}
+
+type SQLRepo struct{}
+func (r *SQLRepo) Save(data string) error { return nil }
+func NewSQLRepo() *SQLRepo { return &SQLRepo{} }
+
+// 1. Register concrete constructor
+di.Init([]interface{}{NewSQLRepo})
+
+// 2. Bind interface to concrete type
+di.BindInterface[Repository, *SQLRepo]()
+
+// 3. Resolve by interface
+repo, _ := di.Resolve[Repository]()
+```
+
+**Multiple Implementations (Named Bindings):**
+
+```go
+di.BindInterfaceNamed[Logger, *ConsoleLogger]("console")
+di.BindInterfaceNamed[Logger, *FileLogger]("file")
+
+consoleLogger, _ := di.ResolveNamed[Logger]("console")
+fileLogger, _ := di.ResolveNamed[Logger]("file")
+```
+
 ### HTTP Request Scoping Example
 
 ```go
@@ -297,7 +349,6 @@ For detailed architecture documentation including flowcharts and internal design
 
 ## Limitations
 
-- DepWeaver resolves by concrete types as returned by constructors. If you need interface-based resolution, return the interface type from your constructor (e.g., `func NewRepo(db *DB) Repository`).
 - Generic resolution requires specifying the exact type parameter, e.g., `di.Resolve[*MyType]()`.
 - Scoped dependencies require explicit scope management - always call `DestroyScope()` to prevent memory leaks.
 

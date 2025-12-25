@@ -13,6 +13,8 @@ graph TB
         ResolveScoped[di.ResolveScoped]
         GetProvider[di.GetProvider]
         RegisterRuntime[di.RegisterRuntime]
+        BindInterface[di.BindInterface]
+        ResolveNamed[di.ResolveNamed]
     end
     
     subgraph "Container Layer"
@@ -27,6 +29,7 @@ graph TB
         Singletons[Singleton Cache]
         ScopedCache[Scoped Cache]
         Creating[Creating Tracker]
+        Bindings[Interface Bindings]
     end
     
     Init --> RegMgr
@@ -40,6 +43,7 @@ graph TB
     ResMgr --> Singletons
     ResMgr --> ScopedCache
     ResMgr --> Creating
+    ResMgr --> Bindings
     ScopeMgr --> ScopedCache
     
     DC --> RegMgr
@@ -59,6 +63,8 @@ Central component that manages all dependencies.
 - `scopedInstances`: Scoped instance cache (by scope ID)
 - `creating`: Circular dependency detection tracker
 - `resolutionStack`: Dependency chain for error reporting
+- `interfaceBindings`: Unnamed interface → concrete type mapping
+- `namedInterfaceBindings`: Named interface bindings (name → interface → type)
 
 **Thread Safety:**
 - Uses `sync.RWMutex` for concurrent access
@@ -160,6 +166,18 @@ flowchart TD
     ReturnInstance --> End
     ScopeError --> End
     CircularError --> End
+
+### Interface-Based Resolution
+
+```mermaid
+flowchart TD
+    Start([Resolve Interface I]) --> CheckBinding{Binding<br/>Exists?}
+    CheckBinding -->|No| ContinueNormal[Continue with<br/>Normal Resolution]
+    CheckBinding -->|Yes| ResolveConcrete[Resolve Concrete<br/>Type C]
+    ResolveConcrete --> UseScope[Apply Original Scope]
+    UseScope --> End([Done])
+    
+    ContinueNormal --> End
 ```
 
 ## Provider Pattern
