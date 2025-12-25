@@ -5,10 +5,20 @@ import (
 	"reflect"
 )
 
-// RegisterConstructor adds a constructor function for a specific type
+// RegisterConstructor adds a constructor function for a specific type with Singleton scope (default)
 // @Param constructor interface{} - constructor function
 func (dc *DependencyContainer) RegisterConstructor(
 	constructor interface{},
+) error {
+	return dc.RegisterConstructorWithScope(constructor, Singleton)
+}
+
+// RegisterConstructorWithScope adds a constructor function with a specific scope
+// @Param constructor interface{} - constructor function
+// @Param scope Scope - lifetime scope for the dependency
+func (dc *DependencyContainer) RegisterConstructorWithScope(
+	constructor interface{},
+	scope Scope,
 ) error {
 	dc.mu.Lock()
 	defer dc.mu.Unlock()
@@ -32,7 +42,7 @@ func (dc *DependencyContainer) RegisterConstructor(
 	returnType := constructorType.Out(0)
 
 	// Wrap the constructor to work with the container
-	dc.constructors[returnType] = func(container *DependencyContainer) (interface{}, error) {
+	wrappedConstructor := func(container *DependencyContainer, scopeID string) (interface{}, error) {
 		// Use reflection to call the constructor with dependencies
 		constructorValue := reflect.ValueOf(constructor)
 		constructorType := constructorValue.Type()
@@ -41,7 +51,7 @@ func (dc *DependencyContainer) RegisterConstructor(
 		args := make([]reflect.Value, constructorType.NumIn())
 		for i := 0; i < constructorType.NumIn(); i++ {
 			argType := constructorType.In(i)
-			arg, err := container.resolve(argType)
+			arg, err := container.resolveWithScope(argType, scopeID)
 			if err != nil {
 				return nil, fmt.Errorf("error resolving dependency for %v: %v", argType, err)
 			}
@@ -61,5 +71,22 @@ func (dc *DependencyContainer) RegisterConstructor(
 		return results[0].Interface(), nil
 	}
 
+	dc.constructors[returnType] = &Registration{
+		constructor: wrappedConstructor,
+		scope:       scope,
+	}
+
 	return nil
+}
+
+// RegisterRuntimeConstructor allows registration of constructors after initialization
+// @Param constructor interface{} - constructor function
+// @Param scope Scope - lifetime scope for the dependency
+func (dc *DependencyContainer) RegisterRuntimeConstructor(
+	constructor interface{},
+	scope Scope,
+) error {
+	// Runtime registration is the same as regular registration
+	// The container is already thread-safe with locks
+	return dc.RegisterConstructorWithScope(constructor, scope)
 }
